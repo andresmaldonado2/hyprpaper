@@ -3,6 +3,9 @@
 CHyprpaper::CHyprpaper() { }
 
 void CHyprpaper::init() {
+
+    removeOldHyprpaperImages();
+
     g_pConfigManager = std::make_unique<CConfigManager>();
     g_pIPCSocket = std::make_unique<CIPCSocket>();
 
@@ -62,11 +65,63 @@ bool CHyprpaper::isPreloaded(const std::string& path) {
     return false;
 }
 
+void CHyprpaper::unloadWallpaper(const std::string& path) {
+    bool found = false;
+
+    for (auto& [ewp, cls] : m_mWallpaperTargets) {
+        if (ewp == path) {
+            // found
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        Debug::log(LOG, "Cannot unload a target that was not loaded!");
+        return;
+    }
+
+    // clean buffers
+    for (auto it = m_vBuffers.begin(); it != m_vBuffers.end();) {
+
+        if (it->get()->target != path) {
+            it++;
+            continue;
+        }
+
+        const auto PRELOADPATH = it->get()->name;
+
+        Debug::log(LOG, "Unloading target %s, preload path %s", path.c_str(), PRELOADPATH.c_str());
+
+        std::filesystem::remove(PRELOADPATH);
+
+        destroyBuffer(it->get());
+
+        it = m_vBuffers.erase(it);
+    }
+
+    m_mWallpaperTargets.erase(path); // will free the cairo surface
+}
+
 void CHyprpaper::preloadAllWallpapersFromConfig() {
     if (g_pConfigManager->m_dRequestedPreloads.empty())
         return;
 
     for (auto& wp : g_pConfigManager->m_dRequestedPreloads) {
+
+        // check if it doesnt exist
+        bool exists = false;
+        for (auto&[ewp, cls] : m_mWallpaperTargets) {
+            if (ewp == wp) {
+                Debug::log(LOG, "Ignoring request to preload %s as it already is preloaded!", ewp.c_str());
+                exists = true;
+                break;
+            }
+        }
+
+        if (exists)
+            continue;
+
         m_mWallpaperTargets[wp] = CWallpaperTarget();
         m_mWallpaperTargets[wp].create(wp);
     }
@@ -94,6 +149,31 @@ void CHyprpaper::recheckMonitor(SMonitor* pMonitor) {
     }
 }
 
+void CHyprpaper::removeOldHyprpaperImages() {
+    int cleaned = 0;
+    uint64_t memoryFreed = 0;
+
+    for (const auto& entry : std::filesystem::directory_iterator(std::string(getenv("XDG_RUNTIME_DIR")))) {
+        if (entry.is_directory())
+            continue;
+
+        const auto FILENAME = entry.path().filename().string();
+
+        if (FILENAME.contains(".hyprpaper_")) {
+            // unlink it
+
+            memoryFreed += entry.file_size();
+            if (!std::filesystem::remove(entry.path()))
+                Debug::log(LOG, "Couldn't remove %s", entry.path().string().c_str());
+            cleaned++;
+        }
+    }
+
+    if (cleaned != 0) {
+        Debug::log(LOG, "Cleaned old hyprpaper preloads (%i), removing %.1fMB", cleaned, ((float)memoryFreed) / 1000000.f);
+    }
+}
+
 SMonitor* CHyprpaper::getMonitorFromName(const std::string& monname) {
     for (auto& m : m_vMonitors) {
         if (m->name == monname)
@@ -113,7 +193,7 @@ void CHyprpaper::ensurePoolBuffersPresent() {
                 continue;
 
             auto it = std::find_if(m_vBuffers.begin(), m_vBuffers.end(), [&](const std::unique_ptr<SPoolBuffer>& el) {
-                return el->pTarget == &wt && el->pixelSize == m->size;
+                return el->target == wt.m_szPath && el->pixelSize == m->size * m->scale;
             });
 
             if (it == m_vBuffers.end()) {
@@ -122,9 +202,9 @@ void CHyprpaper::ensurePoolBuffersPresent() {
 
                 createBuffer(PBUFFER, m->size.x * m->scale, m->size.y * m->scale, WL_SHM_FORMAT_ARGB8888);
 
-                PBUFFER->pTarget = &wt;
+                PBUFFER->target = wt.m_szPath;
 
-                Debug::log(LOG, "Buffer created, Shared Memory usage: %.1fMB", PBUFFER->size / 1000000.f);
+                Debug::log(LOG, "Buffer created for target %s, Shared Memory usage: %.1fMB", wt.m_szPath.c_str(), PBUFFER->size / 1000000.f);
 
                 anyNewBuffers = true;
             }
@@ -278,6 +358,7 @@ void CHyprpaper::createBuffer(SPoolBuffer* pBuffer, int32_t w, int32_t h, uint32
     pBuffer->surface = cairo_image_surface_create_for_data((unsigned char*)DATA, CAIRO_FORMAT_ARGB32, w, h, STRIDE);
     pBuffer->cairo = cairo_create(pBuffer->surface);
     pBuffer->pixelSize = Vector2D(w, h);
+    pBuffer->name = name;
 }
 
 void CHyprpaper::destroyBuffer(SPoolBuffer* pBuffer) {
@@ -291,7 +372,7 @@ void CHyprpaper::destroyBuffer(SPoolBuffer* pBuffer) {
 
 SPoolBuffer* CHyprpaper::getPoolBuffer(SMonitor* pMonitor, CWallpaperTarget* pWallpaperTarget) {
     return std::find_if(m_vBuffers.begin(), m_vBuffers.end(), [&](const std::unique_ptr<SPoolBuffer>& el) {
-        return el->pTarget == pWallpaperTarget && el->pixelSize == pMonitor->size;
+        return el->target == pWallpaperTarget->m_szPath && el->pixelSize == pMonitor->size * pMonitor->scale;
     })->get();
 }
 
@@ -303,7 +384,19 @@ void CHyprpaper::renderWallpaperForMonitor(SMonitor* pMonitor) {
         exit(1);
     }
 
-    auto *const PBUFFER = getPoolBuffer(pMonitor, PWALLPAPERTARGET);
+    auto* PBUFFER = getPoolBuffer(pMonitor, PWALLPAPERTARGET);
+
+    if (!PBUFFER) {
+        Debug::log(LOG, "Pool buffer missing for available target??");
+        ensurePoolBuffersPresent();
+
+        PBUFFER = getPoolBuffer(pMonitor, PWALLPAPERTARGET);
+
+        if (!PBUFFER) {
+            Debug::log(LOG, "Pool buffer failed #2. Ignoring WP.");
+            return;
+        }
+    }
 
     const auto PCAIRO = PBUFFER->cairo;
     cairo_save(PCAIRO);
@@ -316,14 +409,14 @@ void CHyprpaper::renderWallpaperForMonitor(SMonitor* pMonitor) {
     float scale;
     Vector2D origin;
     if (pMonitor->size.x / pMonitor->size.y > PWALLPAPERTARGET->m_vSize.x / PWALLPAPERTARGET->m_vSize.y) {
-        scale = pMonitor->size.x / PWALLPAPERTARGET->m_vSize.x;
+        scale = pMonitor->size.x * pMonitor->scale / PWALLPAPERTARGET->m_vSize.x;
 
-        origin.y = - (PWALLPAPERTARGET->m_vSize.y * scale - pMonitor->size.y) / 2.f / scale;
+        origin.y = - (PWALLPAPERTARGET->m_vSize.y * scale - pMonitor->size.y * pMonitor->scale) / 2.f / scale;
 
     } else {
-        scale = pMonitor->size.y / PWALLPAPERTARGET->m_vSize.y;
+        scale = pMonitor->size.y * pMonitor->scale / PWALLPAPERTARGET->m_vSize.y;
 
-        origin.x = - (PWALLPAPERTARGET->m_vSize.x * scale - pMonitor->size.x) / 2.f / scale;
+        origin.x = - (PWALLPAPERTARGET->m_vSize.x * scale - pMonitor->size.x * pMonitor->scale) / 2.f / scale;
     }
 
     Debug::log(LOG, "Image data for %s: %s at [%.2f, %.2f], scale: %.2f (original image size: [%i, %i])", pMonitor->name.c_str(), PWALLPAPERTARGET->m_szPath.c_str(), origin.x, origin.y, scale, (int)PWALLPAPERTARGET->m_vSize.x, (int)PWALLPAPERTARGET->m_vSize.y);

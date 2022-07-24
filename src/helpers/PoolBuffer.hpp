@@ -10,7 +10,8 @@ struct SPoolBuffer {
     cairo_t* cairo = nullptr;
     void* data = nullptr;
     size_t size = 0;
+    std::string name = "";
 
-    CWallpaperTarget* pTarget = nullptr;
+    std::string target = "";
     Vector2D pixelSize;
 };

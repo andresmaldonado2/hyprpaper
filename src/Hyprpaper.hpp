@@ -28,6 +28,7 @@ public:
     std::vector<std::unique_ptr<SPoolBuffer>> m_vBuffers;
     std::vector<std::unique_ptr<SMonitor>> m_vMonitors;
 
+    void        removeOldHyprpaperImages();
     void        preloadAllWallpapersFromConfig();
     void        recheckAllMonitors();
     void        ensureMonitorHasActiveWallpaper(SMonitor*);
@@ -43,6 +44,7 @@ public:
     void        recheckMonitor(SMonitor*);
     void        ensurePoolBuffersPresent();
     SPoolBuffer* getPoolBuffer(SMonitor*, CWallpaperTarget*);
+    void        unloadWallpaper(const std::string&);
 
     std::mutex  m_mtTickMutex;
 private:
