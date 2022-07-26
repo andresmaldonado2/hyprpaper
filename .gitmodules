@@ -1,0 +1,3 @@
+[submodule "vkvg"]
+	path = subprojects/vkvg
+	url = https://github.com/jpbruyere/vkvg.git
