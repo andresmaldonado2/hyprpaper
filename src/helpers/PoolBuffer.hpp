@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../defines.hpp"
+#include "../../subprojects/vkvg/include/vkvg.h"
 
 class CWallpaperTarget;
 

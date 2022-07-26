@@ -8,6 +8,7 @@
 #include "helpers/PoolBuffer.hpp"
 #include "ipc/Socket.hpp"
 #include <mutex>
+#include "../subprojects/vkvg/include/vkvg.h"
 
 class CHyprpaper {
 public:

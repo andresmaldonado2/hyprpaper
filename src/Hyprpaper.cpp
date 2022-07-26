@@ -1,5 +1,5 @@
 #include "Hyprpaper.hpp"
-#include "/home/sora/Downloads/vkvg/include/vkvg.h"
+#include "../subprojects/vkvg/include/vkvg.h"
 
 CHyprpaper::CHyprpaper() { }
 

@@ -1,5 +1,5 @@
 #include "WallpaperTarget.hpp"
-#include "/home/sora/Downloads/vkvg/include/vkvg.h"
+#include "../../subprojects/vkvg/include/vkvg.h"
 
 CWallpaperTarget::~CWallpaperTarget() {
     vkvg_surface_destroy(m_pVulkanSurface);
@@ -11,7 +11,7 @@ void CWallpaperTarget::create(const std::string& path) {
     const auto BEGINLOAD = std::chrono::system_clock::now();
 
     // need to ask vaxry if wall paper resolves here or not
-    VkvgDevice VULKAN_DEVICE =vkvg_device_create(VK_SAMPLE_COUNT_1_BIT, true);
+    VkvgDevice VULKAN_DEVICE = vkvg_device_create(VK_SAMPLE_COUNT_1_BIT, true);
     VkvgSurface VULKAN_SURFACE = nullptr;
     if (path.find(".png") == path.length() - 4) {
         // TODO replace with sail, check to see if using memory mapped image is faster when combined with sail
