@@ -1,4 +1,5 @@
 #include "Hyprpaper.hpp"
+#include "/home/sora/Downloads/vkvg/include/vkvg.h"
 
 CHyprpaper::CHyprpaper() { }
 
@@ -200,7 +201,7 @@ void CHyprpaper::ensurePoolBuffersPresent() {
                 // create
                 const auto PBUFFER = m_vBuffers.emplace_back(std::make_unique<SPoolBuffer>()).get();
 
-                createBuffer(PBUFFER, m->size.x * m->scale, m->size.y * m->scale, WL_SHM_FORMAT_ARGB8888);
+                createBuffer(PBUFFER, wt.m_pVulkanDevice, m->size.x * m->scale, m->size.y * m->scale, WL_SHM_FORMAT_ARGB8888);
 
                 PBUFFER->target = wt.m_szPath;
 
@@ -334,7 +335,7 @@ int CHyprpaper::createPoolFile(size_t size, std::string& name) {
     return FD;
 }
 
-void CHyprpaper::createBuffer(SPoolBuffer* pBuffer, int32_t w, int32_t h, uint32_t format) {
+void CHyprpaper::createBuffer(SPoolBuffer* pBuffer, VkvgDevice device, int32_t w, int32_t h, uint32_t format) {
     const uint STRIDE = w * 4;
     const size_t SIZE = STRIDE * h;
 
@@ -355,16 +356,16 @@ void CHyprpaper::createBuffer(SPoolBuffer* pBuffer, int32_t w, int32_t h, uint32
 
     pBuffer->size = SIZE;
     pBuffer->data = DATA;
-    pBuffer->surface = cairo_image_surface_create_for_data((unsigned char*)DATA, CAIRO_FORMAT_ARGB32, w, h, STRIDE);
-    pBuffer->cairo = cairo_create(pBuffer->surface);
+    pBuffer->surface = vkvg_surface_create_from_bitmap(device, (unsigned char*)DATA, w, h);
+    pBuffer->vkvg = vkvg_create(pBuffer->surface);
     pBuffer->pixelSize = Vector2D(w, h);
     pBuffer->name = name;
 }
 
 void CHyprpaper::destroyBuffer(SPoolBuffer* pBuffer) {
     wl_buffer_destroy(pBuffer->buffer);
-    cairo_destroy(pBuffer->cairo);
-    cairo_surface_destroy(pBuffer->surface);
+    vkvg_destroy(pBuffer->vkvg);
+    vkvg_surface_destroy(pBuffer->surface);
     munmap(pBuffer->data, pBuffer->size);
 
     pBuffer->buffer = nullptr;
@@ -377,6 +378,7 @@ SPoolBuffer* CHyprpaper::getPoolBuffer(SMonitor* pMonitor, CWallpaperTarget* pWa
 }
 
 void CHyprpaper::renderWallpaperForMonitor(SMonitor* pMonitor) {
+    const auto BEGINLOAD = std::chrono::system_clock::now();
     const auto PWALLPAPERTARGET = m_mMonitorActiveWallpaperTargets[pMonitor];
 
     if (!PWALLPAPERTARGET) {
@@ -398,14 +400,17 @@ void CHyprpaper::renderWallpaperForMonitor(SMonitor* pMonitor) {
         }
     }
 
-    const auto PCAIRO = PBUFFER->cairo;
-    cairo_save(PCAIRO);
-    cairo_set_operator(PCAIRO, CAIRO_OPERATOR_CLEAR);
-    cairo_paint(PCAIRO);
-    cairo_restore(PCAIRO);
+    const auto PVULKAN = PBUFFER->vkvg;
+    vkvg_save(PVULKAN);
+    // TODO double check to make sure line below is correct - Sora
+    vkvg_set_operator(PVULKAN, VKVG_OPERATOR_CLEAR);
+    vkvg_paint(PVULKAN);
+    vkvg_restore(PVULKAN);
 
     // get scale
     // we always do cover
+    // TODO double check to make sure vulkan scale is the same as cairo scale
+    //  supposed to be but who knows - Sora
     float scale;
     Vector2D origin;
     if (pMonitor->size.x / pMonitor->size.y > PWALLPAPERTARGET->m_vSize.x / PWALLPAPERTARGET->m_vSize.y) {
@@ -421,17 +426,19 @@ void CHyprpaper::renderWallpaperForMonitor(SMonitor* pMonitor) {
 
     Debug::log(LOG, "Image data for %s: %s at [%.2f, %.2f], scale: %.2f (original image size: [%i, %i])", pMonitor->name.c_str(), PWALLPAPERTARGET->m_szPath.c_str(), origin.x, origin.y, scale, (int)PWALLPAPERTARGET->m_vSize.x, (int)PWALLPAPERTARGET->m_vSize.y);
 
-    cairo_scale(PCAIRO, scale, scale);
-    cairo_set_source_surface(PCAIRO, PWALLPAPERTARGET->m_pCairoSurface, origin.x, origin.y);
+    vkvg_scale(PVULKAN, scale, scale);
+    vkvg_set_source_surface(PVULKAN, PWALLPAPERTARGET->m_pVulkanSurface, origin.x, origin.y);
 
-    cairo_paint(PCAIRO);
-    cairo_restore(PCAIRO);
+    vkvg_paint(PVULKAN);
+    vkvg_restore(PVULKAN);
 
     wl_surface_attach(pMonitor->pCurrentLayerSurface->pSurface, PBUFFER->buffer, 0, 0);
     wl_surface_set_buffer_scale(pMonitor->pCurrentLayerSurface->pSurface, pMonitor->scale);
     wl_surface_damage_buffer(pMonitor->pCurrentLayerSurface->pSurface, 0, 0, pMonitor->size.x, pMonitor->size.y);
     wl_surface_commit(pMonitor->pCurrentLayerSurface->pSurface);
 
+    const auto MS = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now() - BEGINLOAD).count() / 1000.f;
+    Debug::log(LOG, "Time to load wallpaper: %.2f", MS);
     // check if we dont need to remove a wallpaper
     if (pMonitor->layerSurfaces.size() > 1) {
         for (auto it = pMonitor->layerSurfaces.begin(); it != pMonitor->layerSurfaces.end(); it++) {

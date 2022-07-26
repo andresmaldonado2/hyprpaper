@@ -58,15 +58,17 @@ set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
 include(CPack)
 
+include_directories(. PRIVATE "subprojects/vkvg/include/")
 target_link_libraries(hyprpaper PkgConfig::deps)
-
 target_link_libraries(hyprpaper
-        OpenGL
+	OpenGL
         GLESv2
         pthread
         ${CMAKE_THREAD_LIBS_INIT}
         ${CMAKE_SOURCE_DIR}/wlr-layer-shell-unstable-v1-protocol.o
         ${CMAKE_SOURCE_DIR}/xdg-shell-protocol.o
+	${CMAKE_SOURCE_DIR}/subprojects/vkvg/build/libvkvg.so
+	${CMAKE_SOURCE_DIR}/subprojects/vkvg/build/vkh/libvkh.a
 )
 
 IF(CMAKE_BUILD_TYPE MATCHES Debug OR CMAKE_BUILD_TYPE MATCHES DEBUG)

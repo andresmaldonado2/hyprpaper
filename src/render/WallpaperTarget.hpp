@@ -17,5 +17,6 @@ public:
 
     bool        m_bHasAlpha = true;
 
-    cairo_surface_t* m_pCairoSurface;
+    VkvgSurface m_pVulkanSurface;
+    VkvgDevice m_pVulkanDevice;
 };

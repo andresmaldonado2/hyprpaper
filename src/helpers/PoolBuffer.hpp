@@ -6,8 +6,9 @@ class CWallpaperTarget;
 
 struct SPoolBuffer {
     wl_buffer* buffer = nullptr;
-    cairo_surface_t* surface = nullptr;
-    cairo_t* cairo = nullptr;
+    VkvgDevice device = nullptr; 
+    VkvgSurface surface = nullptr;
+    VkvgContext vkvg = nullptr;
     void* data = nullptr;
     size_t size = 0;
     std::string name = "";
